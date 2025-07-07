@@ -31,12 +31,13 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py
 
-      # --- NUEVO PASO PARA SUBIR LAS CAPTURAS DE PANTALLA ---
-      - name: Subir capturas de pantalla de errores
-        # 'if: failure()' significa que este paso SOLO se ejecutará si algún paso anterior ha fallado
-        # Sin embargo, lo dejaremos para que se ejecute siempre y así subir las capturas si se generan
+      # --- PASO ACTUALIZADO PARA SUBIR TODOS LOS ARCHIVOS DE DEPURACIÓN ---
+      - name: Subir artefactos de depuración
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots-de-error
-          path: ./*.png  # Sube todos los archivos que terminen en .png
-          if-no-files-found: ignore # No da error si no se encuentra ningún .png
+          name: debug-files
+          # Subimos tanto los .png como los .html
+          path: |
+            *.png
+            *.html
+          if-no-files-found: ignore
