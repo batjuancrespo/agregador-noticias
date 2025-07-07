@@ -13,9 +13,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (CON SELECTORES FINALES Y VERIFICADOS) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (CON SELECTORES REFINADOS) ---
 SITIOS_WEB = [
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl'},
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl > a'}, # Selector más específico para AS
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link'},
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link'}
@@ -39,21 +39,38 @@ def handle_cookie_banner(driver):
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
             print(f"  -> Botón de cookies encontrado con el texto: '{button.text}'. Pulsando...")
             button.click()
-            time.sleep(2)
+            time.sleep(3) # Aumentamos la pausa tras el clic por si la página se recarga
             return
         except TimeoutException:
             continue
     print("  -> No se encontró ningún banner de cookies conocido o ya estaba aceptado.")
 
 def obtener_prevision_tiempo():
+    """
+    Obtiene la previsión del tiempo incluyendo temperatura y precipitación.
+    """
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
-        url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m&timezone=Europe/Madrid"
+        # Añadimos los parámetros de precipitación a la petición de la API
+        url_api = (
+            f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}"
+            "&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
+        )
         response = requests.get(url_api, timeout=10)
         response.raise_for_status()
         data = response.json()
+        
+        # Extraemos todos los datos para las 15:00 (índice 15)
         temperatura_15h = data['hourly']['temperature_2m'][15]
-        return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temperatura_15h}°C\n\n"
+        prob_lluvia_15h = data['hourly']['precipitation_probability'][15]
+        precipitacion_15h = data['hourly']['precipitation'][15]
+        
+        mensaje = f"☀️ Previsión para {CIUDAD} a las 15:00\n"
+        mensaje += f"- Temperatura: {temperatura_15h}°C\n"
+        mensaje += f"- Prob. de lluvia: {prob_lluvia_15h}%\n"
+        mensaje += f"- Precipitación: {precipitacion_15h} mm\n\n"
+        return mensaje
+        
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}")
         return f"🔴 No se pudo obtener la previsión del tiempo para {CIUDAD}.\n\n"
@@ -78,8 +95,7 @@ def obtener_titulares():
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver)
 
-                # --- CAMBIO CLAVE: ESPERAR A QUE EL ELEMENTO SEA VISIBLE ---
-                WebDriverWait(driver, 15).until(
+                WebDriverWait(driver, 20).until( # Aumentamos la espera general a 20 segundos
                     EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector']))
                 )
                 
@@ -91,7 +107,9 @@ def obtener_titulares():
                 count = 0
                 titulares_encontrados = set()
                 for titular in titulares_html:
-                    if count >= 5: break
+                    # --- CAMBIO A 10 TITULARES ---
+                    if count >= 10: 
+                        break
                     texto_limpio = titular.get_text(strip=True)
                     if texto_limpio and texto_limpio not in titulares_encontrados:
                         mensaje_noticias += f"- {texto_limpio}\n"
