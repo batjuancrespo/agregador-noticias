@@ -4,7 +4,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import time
 
-# --- Importaciones de Selenium ---
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
@@ -13,15 +12,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (CON SELECTORES REFINADOS) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES DE PRECISIÓN QUIRÚRGICA) ---
 SITIOS_WEB = [
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl > a'}, # Selector más específico para AS
-    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link'},
+    # AS: Buscamos dentro del <main> para evitar barras laterales.
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main h2.s__tl > a'},
+    # Marca y El Mundo: Apuntamos directamente al H2 dentro del enlace para garantizar texto.
+    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2'},
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
-    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link'}
+    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2'}
 ]
 
-# --- CONFIGURACIÓN DEL TIEMPO ---
 CIUDAD = "Santander"
 LATITUD = 43.46
 LONGITUD = -3.81
@@ -37,40 +37,25 @@ def handle_cookie_banner(driver):
     for xpath in accept_button_xpaths:
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            print(f"  -> Botón de cookies encontrado con el texto: '{button.text}'. Pulsando...")
+            print(f"  -> Botón de cookies encontrado. Pulsando...")
             button.click()
-            time.sleep(3) # Aumentamos la pausa tras el clic por si la página se recarga
+            time.sleep(3)
             return
         except TimeoutException:
             continue
-    print("  -> No se encontró ningún banner de cookies conocido o ya estaba aceptado.")
+    print("  -> No se encontró banner de cookies.")
 
 def obtener_prevision_tiempo():
-    """
-    Obtiene la previsión del tiempo incluyendo temperatura y precipitación.
-    """
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
-        # Añadimos los parámetros de precipitación a la petición de la API
-        url_api = (
-            f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}"
-            "&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
-        )
+        url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
         response = requests.get(url_api, timeout=10)
         response.raise_for_status()
         data = response.json()
-        
-        # Extraemos todos los datos para las 15:00 (índice 15)
-        temperatura_15h = data['hourly']['temperature_2m'][15]
-        prob_lluvia_15h = data['hourly']['precipitation_probability'][15]
-        precipitacion_15h = data['hourly']['precipitation'][15]
-        
-        mensaje = f"☀️ Previsión para {CIUDAD} a las 15:00\n"
-        mensaje += f"- Temperatura: {temperatura_15h}°C\n"
-        mensaje += f"- Prob. de lluvia: {prob_lluvia_15h}%\n"
-        mensaje += f"- Precipitación: {precipitacion_15h} mm\n\n"
-        return mensaje
-        
+        temp = data['hourly']['temperature_2m'][15]
+        prob_lluvia = data['hourly']['precipitation_probability'][15]
+        precip = data['hourly']['precipitation'][15]
+        return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temp}°C\n- Prob. de lluvia: {prob_lluvia}%\n- Precipitación: {precip} mm\n\n"
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}")
         return f"🔴 No se pudo obtener la previsión del tiempo para {CIUDAD}.\n\n"
@@ -91,14 +76,16 @@ def obtener_titulares():
 
         for sitio in SITIOS_WEB:
             try:
-                print(f"Obteniendo titulares de: {sitio['nombre']} con Selenium...")
+                print(f"Obteniendo titulares de: {sitio['nombre']}...")
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver)
 
-                WebDriverWait(driver, 20).until( # Aumentamos la espera general a 20 segundos
-                    EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector']))
-                )
-                
+                # --- Estrategia especial para El Diario Montañés (y no hace daño a los demás) ---
+                print("  -> Haciendo scroll para activar contenido perezoso...")
+                driver.execute_script("window.scrollTo(0, 800);")
+                time.sleep(2)
+
+                WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 titulares_html = soup.select(sitio['selector'])
                 print(f"  -> ¡ÉXITO! Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
@@ -107,24 +94,25 @@ def obtener_titulares():
                 count = 0
                 titulares_encontrados = set()
                 for titular in titulares_html:
-                    # --- CAMBIO A 10 TITULARES ---
-                    if count >= 10: 
-                        break
+                    if count >= 10: break
                     texto_limpio = titular.get_text(strip=True)
                     if texto_limpio and texto_limpio not in titulares_encontrados:
                         mensaje_noticias += f"- {texto_limpio}\n"
                         titulares_encontrados.add(texto_limpio)
                         count += 1
+                
+                # Si no se encontraron titulares con texto, mostrar un mensaje
+                if count == 0:
+                    mensaje_noticias += "- No se encontraron titulares válidos.\n"
                 mensaje_noticias += "\n"
 
             except TimeoutException:
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
-                print(f"  -> ERROR: Timeout esperando la visibilidad del selector '{sitio['selector']}'.")
-                print(f"  -> Se ha guardado una captura de pantalla en '{screenshot_file}'.")
+                print(f"  -> ERROR: Timeout esperando la visibilidad del selector '{sitio['selector']}'. Captura guardada.")
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']} (Timeout).\n\n"
             except Exception as e:
-                print(f"Error inesperado durante el scraping de {sitio['nombre']}: {e}")
+                print(f"Error inesperado en {sitio['nombre']}: {e}")
                 mensaje_noticias += f"🔴 Error inesperado en {sitio['nombre']}.\n\n"
     finally:
         if driver:
