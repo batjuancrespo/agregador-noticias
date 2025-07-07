@@ -12,14 +12,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES ULTRA-PRECISOS) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES FINALES Y ROBUSTOS) ---
 SITIOS_WEB = [
-    # AS: Buscamos un h2 dentro de un enlace, que a su vez esté en el <main>
+    # AS: Buscamos un h2 dentro de un enlace, en cualquier parte del <main>
     {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main a h2'},
-    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'},
-    # El Diario Montañés: Buscamos un titular dentro de un article.voc-story con un enlace
-    {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'article.voc-story a h2.voc-title'},
-    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'}
+    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'h2.ue-c-cover-content__headline'},
+    # El Diario Montañés: Volvemos al selector original, confiando en el scroll agresivo
+    {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
+    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'h2.ue-c-cover-content__headline'}
 ]
 
 CIUDAD = "Santander"
@@ -28,10 +28,7 @@ LONGITUD = -3.81
 
 def handle_cookie_banner(driver):
     time.sleep(2)
-    accept_button_xpaths = [
-        "//button[contains(., 'I accept and continue for free')]", "//button[contains(., 'Accept and continue')]",
-        "//button[contains(., 'Aceptar y continuar')]", "//button[contains(., 'Aceptar')]"
-    ]
+    accept_button_xpaths = ["//button[contains(., 'I accept')]", "//button[contains(., 'Aceptar')]"]
     for xpath in accept_button_xpaths:
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
@@ -52,15 +49,14 @@ def obtener_prevision_tiempo():
         precip = data['hourly']['precipitation'][15]
         return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temp}°C\n- Prob. de lluvia: {prob_lluvia}%\n- Precipitación: {precip} mm\n\n"
     except Exception as e:
-        print(f"Error obteniendo el tiempo: {e}")
-        return f"🔴 No se pudo obtener la previsión del tiempo para {CIUDAD}.\n\n"
+        print(f"Error obteniendo el tiempo: {e}"); return f"🔴 No se pudo obtener la previsión del tiempo.\n\n"
 
 def obtener_titulares():
     mensaje_noticias = "📰 Titulares del día\n\n"
     chrome_options = Options()
     chrome_options.add_argument("--headless"); chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage"); chrome_options.add_argument("--window-size=1920,1200")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
     
     driver = None
     try:
@@ -72,31 +68,32 @@ def obtener_titulares():
                 print(f"\n--- PROCESANDO: {sitio['nombre']} ---")
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver)
-                print("  -> Haciendo scroll para activar contenido...")
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-                time.sleep(2)
 
-                WebDriverWait(driver, 25).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
+                # --- ESTRATEGIA DE SCROLL AGRESIVO ---
+                print("  -> Realizando scroll agresivo para cargar todo el contenido...")
+                last_height = driver.execute_script("return document.body.scrollHeight")
+                for _ in range(3): # Hacemos scroll 3 veces
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(2)
+                    new_height = driver.execute_script("return document.body.scrollHeight")
+                    if new_height == last_height: break # Si la altura no cambia, dejamos de hacer scroll
+                    last_height = new_height
+
+                WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 titulares_html = soup.select(sitio['selector'])
-                print(f"  -> Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
+                print(f"  -> ¡ÉXITO! Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
 
                 mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
-                count = 0
-                titulares_encontrados_set = set()
-                
+                count = 0; titulares_encontrados_set = set()
                 for titular_element in titulares_html:
-                    if count >= 7: break # LÍMITE DE 7 TITULARES
-                    
+                    if count >= 7: break
                     texto_limpio = titular_element.get_text(strip=True)
-                    if len(texto_limpio) > 85: # TRUNCAR TITULARES LARGOS
-                        texto_limpio = texto_limpio[:82] + "..."
-                        
+                    if len(texto_limpio) > 85: texto_limpio = texto_limpio[:82] + "..."
                     if texto_limpio and texto_limpio not in titulares_encontrados_set:
                         mensaje_noticias += f"- {texto_limpio}\n"
                         titulares_encontrados_set.add(texto_limpio)
                         count += 1
-                
                 if count == 0: mensaje_noticias += "- No se encontraron titulares válidos.\n"
                 mensaje_noticias += "\n"
 
@@ -110,7 +107,6 @@ def obtener_titulares():
     return mensaje_noticias
 
 def enviar_notificacion(topic_url, mensaje, titulo):
-    # ... (sin cambios) ...
     try:
         requests.post(
             topic_url, data=mensaje.encode('utf-8'),
