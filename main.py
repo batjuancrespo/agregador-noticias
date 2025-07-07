@@ -12,14 +12,14 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES DE PRECISIÓN QUIRÚRGICA) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES DE PRECISIÓN QUIRÚRGICA v2) ---
 SITIOS_WEB = [
-    # AS: Buscamos dentro del <main> para evitar barras laterales.
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main h2.s__tl > a'},
-    # Marca y El Mundo: Apuntamos directamente al H2 dentro del enlace para garantizar texto.
-    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2'},
-    {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
-    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2'}
+    # AS: Buscamos h2 > a dentro de un artículo con la clase .s-art, que a su vez está en el <main>
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main article.s-art h2 > a'},
+    # Marca y El Mundo: Apuntamos al H2, que es donde está el texto garantizado.
+    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'},
+    {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'article.voc-story h2.voc-title a'},
+    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'}
 ]
 
 CIUDAD = "Santander"
@@ -37,15 +37,16 @@ def handle_cookie_banner(driver):
     for xpath in accept_button_xpaths:
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            print(f"  -> Botón de cookies encontrado. Pulsando...")
+            print(f"  -> [LOG] Botón de cookies encontrado. Pulsando...")
             button.click()
             time.sleep(3)
             return
         except TimeoutException:
             continue
-    print("  -> No se encontró banner de cookies.")
+    print("  -> [LOG] No se encontró banner de cookies.")
 
 def obtener_prevision_tiempo():
+    # ... (esta función ya funciona bien, no se necesita modificar) ...
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
@@ -76,50 +77,66 @@ def obtener_titulares():
 
         for sitio in SITIOS_WEB:
             try:
-                print(f"Obteniendo titulares de: {sitio['nombre']}...")
+                print(f"\n--- PROCESANDO: {sitio['nombre']} ---")
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver)
-
-                # --- Estrategia especial para El Diario Montañés (y no hace daño a los demás) ---
-                print("  -> Haciendo scroll para activar contenido perezoso...")
+                print("  -> [LOG] Haciendo scroll para activar contenido perezoso...")
                 driver.execute_script("window.scrollTo(0, 800);")
                 time.sleep(2)
 
                 WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 titulares_html = soup.select(sitio['selector'])
-                print(f"  -> ¡ÉXITO! Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
+                print(f"  -> [LOG] ¡ÉXITO! Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
 
                 mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
                 count = 0
-                titulares_encontrados = set()
-                for titular in titulares_html:
-                    if count >= 10: break
-                    texto_limpio = titular.get_text(strip=True)
-                    if texto_limpio and texto_limpio not in titulares_encontrados:
-                        mensaje_noticias += f"- {texto_limpio}\n"
-                        titulares_encontrados.add(texto_limpio)
-                        count += 1
+                titulares_encontrados_set = set()
                 
-                # Si no se encontraron titulares con texto, mostrar un mensaje
+                # --- BUCLE CON DEPURACIÓN INTERNA ---
+                for i, titular_element in enumerate(titulares_html):
+                    if count >= 10: break
+                    try:
+                        texto_limpio = titular_element.get_text(strip=True)
+                        # Comprobación de que no sea un titular repetido o vacío
+                        if texto_limpio and texto_limpio not in titulares_encontrados_set:
+                            mensaje_noticias += f"- {texto_limpio}\n"
+                            titulares_encontrados_set.add(texto_limpio)
+                            count += 1
+                            print(f"    [+] Agregado titular {count}: {texto_limpio[:60]}...")
+                    except Exception as e_inner:
+                        print(f"    [!] Error procesando el elemento {i}: {e_inner}")
+                
                 if count == 0:
-                    mensaje_noticias += "- No se encontraron titulares válidos.\n"
+                    mensaje_noticias += "- No se encontraron titulares válidos para mostrar.\n"
                 mensaje_noticias += "\n"
+                print(f"  -> [LOG] FIN de {sitio['nombre']}. Total titulares agregados: {count}")
+
 
             except TimeoutException:
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
-                print(f"  -> ERROR: Timeout esperando la visibilidad del selector '{sitio['selector']}'. Captura guardada.")
+                print(f"  -> [ERROR] Timeout esperando la visibilidad del selector '{sitio['selector']}'. Captura guardada.")
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']} (Timeout).\n\n"
             except Exception as e:
-                print(f"Error inesperado en {sitio['nombre']}: {e}")
+                print(f"[ERROR] Error inesperado en {sitio['nombre']}: {e}")
                 mensaje_noticias += f"🔴 Error inesperado en {sitio['nombre']}.\n\n"
+            
+            # --- LOG DE CONSTRUCCIÓN DEL MENSAJE ---
+            print(f"--- ESTADO DEL MENSAJE TRAS {sitio['nombre'].upper()} ---")
+            print(mensaje_noticias)
+            print("-------------------------------------------------")
+
+
     finally:
         if driver:
             driver.quit()
     return mensaje_noticias
 
 def enviar_notificacion(topic_url, mensaje, titulo):
+    print("\n--- MENSAJE FINAL A ENVIAR ---")
+    print(mensaje)
+    print("----------------------------")
     try:
         requests.post(
             topic_url,
