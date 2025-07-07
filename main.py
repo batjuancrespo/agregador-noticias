@@ -11,7 +11,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchFrameException
+from selenium.common.exceptions import TimeoutException
 
 # --- CONFIGURACIÓN DE SITIOS WEB ---
 SITIOS_WEB = [
@@ -27,36 +27,39 @@ LATITUD = 43.46
 LONGITUD = -3.81
 
 def handle_cookie_banner(driver):
-    time.sleep(3) # Damos un respiro inicial a la página para que cargue el banner
+    """
+    Función súper robusta que busca y pulsa el botón de aceptar cookies
+    usando el texto exacto de los botones de las capturas de pantalla.
+    """
+    time.sleep(2) # Pausa inicial
     
-    # INTENTO 1: Banner dentro de un iFrame (Típico de Marca/Mundo)
-    try:
-        # Buscamos el iframe por su título, que suele ser constante
-        WebDriverWait(driver, 5).until(EC.frame_to_be_available_and_switch_to_it((By.XPATH, "//iframe[contains(@title, 'Priserv')]")))
-        print("  -> iFrame de cookies encontrado. Entrando...")
-        # Una vez dentro del iframe, buscamos el botón de aceptar
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#didomi-notice-agree-button"))).click()
-        print("  -> Botón de aceptar en iFrame pulsado.")
-        # MUY IMPORTANTE: Volver al contenido principal de la página
-        driver.switch_to.default_content()
-        time.sleep(2)
-        return
-    except (TimeoutException, NoSuchFrameException):
-        print("  -> No se encontró iFrame de cookies. Cambiando a estrategia normal.")
-        # Si falla, volvemos al contenido principal por si acaso
-        driver.switch_to.default_content()
+    # Lista de XPaths para los diferentes botones de "Aceptar"
+    # El orden es de más específico a más general
+    accept_button_xpaths = [
+        "//button[contains(., 'I accept and continue for free')]", # Para MARCA
+        "//button[contains(., 'Accept and continue')]",            # Para El Mundo
+        "//button[contains(., 'Aceptar y continuar')]",           # Para El Diario Montañés
+        "//button[contains(., 'Aceptar')]"                        # Un genérico de respaldo
+    ]
+    
+    for xpath in accept_button_xpaths:
+        try:
+            # Esperamos un máximo de 3 segundos por cada tipo de botón
+            button = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, xpath))
+            )
+            print(f"  -> Botón de cookies encontrado con el texto: '{button.text}'. Pulsando...")
+            button.click()
+            time.sleep(2) # Damos tiempo a que la página reaccione y desaparezca el banner
+            return # Si lo encontramos y pulsamos, salimos de la función
+        except TimeoutException:
+            # Si no se encuentra este botón, no hacemos nada y probamos el siguiente
+            continue
+            
+    print("  -> No se encontró ningún banner de cookies conocido o ya estaba aceptado.")
 
-    # INTENTO 2: Banner en la página principal (Típico de Vocento y otros)
-    try:
-        selector_vocento = ".voc-button-container .voc-button--primary"
-        WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector_vocento))).click()
-        print("  -> Banner de cookies de Vocento pulsado.")
-        time.sleep(2)
-    except TimeoutException:
-        print("  -> No se encontró ningún banner de cookies conocido.")
 
 def obtener_prevision_tiempo():
-    # ... (esta función no cambia, la omito por brevedad, no la borres de tu archivo) ...
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m&timezone=Europe/Madrid"
@@ -70,13 +73,12 @@ def obtener_prevision_tiempo():
         return f"🔴 No se pudo obtener la previsión del tiempo para {CIUDAD}.\n\n"
 
 def obtener_titulares():
-    # ... (esta función cambia, reemplázala entera) ...
     mensaje_noticias = "📰 Titulares del día\n\n"
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080") # Tamaño de ventana más grande
+    chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
     
     driver = None
@@ -91,15 +93,15 @@ def obtener_titulares():
 
                 handle_cookie_banner(driver)
 
-                WebDriverWait(driver, 15).until( # Aumentamos la espera a 15 segundos
+                # Aumentamos la espera principal por si la página tarda en refrescar tras aceptar cookies
+                WebDriverWait(driver, 15).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, sitio['selector']))
                 )
                 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 titulares_html = soup.select(sitio['selector'])
-                print(f"  -> ¡ÉXITO! Encontrados {len(titulares_html)} elementos.")
+                print(f"  -> ¡ÉXITO! Encontrados {len(titulares_html)} elementos en {sitio['nombre']}.")
 
-                # ... (el resto del bucle para formatear el mensaje es igual) ...
                 mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
                 count = 0
                 titulares_encontrados = set()
@@ -113,7 +115,6 @@ def obtener_titulares():
                 mensaje_noticias += "\n"
 
             except TimeoutException:
-                # --- ¡AQUÍ ESTÁ LA MAGIA DEL DEBUG! ---
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
                 print(f"  -> ERROR: Timeout esperando el selector '{sitio['selector']}'.")
@@ -127,7 +128,6 @@ def obtener_titulares():
             driver.quit()
     return mensaje_noticias
 
-# ... (Las funciones enviar_notificacion y el bloque if __name__ == "__main__" no cambian, déjalas como están) ...
 def enviar_notificacion(topic_url, mensaje, titulo):
     try:
         requests.post(
