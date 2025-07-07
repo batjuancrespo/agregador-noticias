@@ -12,9 +12,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (Volvemos a los más fiables para la depuración) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES PROBADOS Y FINALES) ---
 SITIOS_WEB = [
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl > a'},
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main a h2'},
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'h2.ue-c-cover-content__headline'},
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'h2.ue-c-cover-content__headline'}
@@ -24,29 +24,42 @@ CIUDAD = "Santander"
 LATITUD = 43.46
 LONGITUD = -3.81
 
-def handle_cookie_banner(driver):
+def handle_overlays(driver):
+    """
+    Función multi-paso que maneja diferentes tipos de banners y pop-ups.
+    """
     time.sleep(2)
-    # Buscamos textos genéricos para maximizar compatibilidad
-    accept_button_xpaths = ["//button[contains(., 'I accept')]", "//button[contains(., 'Aceptar')]"]
-    for xpath in accept_button_xpaths:
+    
+    # PASO 1: Intentar cerrar el banner de cookies
+    cookie_button_xpaths = ["//button[contains(., 'I accept')]", "//button[contains(., 'Aceptar')]"]
+    for xpath in cookie_button_xpaths:
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            print(f"  -> Botón de cookies encontrado. Pulsando...")
+            print(f"  -> [NIVEL 1] Banner de cookies encontrado. Pulsando...")
             button.click(); time.sleep(3)
-            return
-        except TimeoutException: continue
-    print("  -> No se encontró banner de cookies.")
+            # No usamos 'return' para poder seguir y buscar más banners
+        except TimeoutException:
+            continue # Si no lo encuentra, prueba el siguiente xpath de cookies
+    
+    # PASO 2: Intentar cerrar el banner de suscripción/promoción (El Diario Montañés)
+    try:
+        # Este selector busca el botón de cierre (X) del pop-up de suscripción
+        promo_close_button = WebDriverWait(driver, 3).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.voc-subscription-wall-container button.art-close"))
+        )
+        print("  -> [NIVEL 2] Banner de promoción encontrado. Cerrando...")
+        promo_close_button.click(); time.sleep(2)
+    except TimeoutException:
+        print("  -> No se encontró banner de promoción o ya estaba cerrado.")
 
 def obtener_prevision_tiempo():
-    # ... (Sin cambios) ...
+    # ... (sin cambios) ...
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
         response = requests.get(url_api, timeout=10)
         response.raise_for_status(); data = response.json()
-        temp = data['hourly']['temperature_2m'][15]
-        prob_lluvia = data['hourly']['precipitation_probability'][15]
-        precip = data['hourly']['precipitation'][15]
+        temp = data['hourly']['temperature_2m'][15]; prob_lluvia = data['hourly']['precipitation_probability'][15]; precip = data['hourly']['precipitation'][15]
         return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temp}°C\n- Prob. de lluvia: {prob_lluvia}%\n- Precipitación: {precip} mm\n\n"
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}"); return f"🔴 No se pudo obtener la previsión del tiempo.\n\n"
@@ -67,12 +80,11 @@ def obtener_titulares():
             try:
                 print(f"\n--- PROCESANDO: {sitio['nombre']} ---")
                 driver.get(sitio['url'])
-                handle_cookie_banner(driver)
+                
+                # --- LLAMAMOS A NUESTRA NUEVA FUNCIÓN INTELIGENTE ---
+                handle_overlays(driver)
 
-                print("  -> Realizando un scroll suave...")
-                driver.execute_script("window.scrollTo(0, 800);")
-                time.sleep(2)
-
+                print("  -> Buscando titulares con el selector...")
                 WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 titulares_html = soup.select(sitio['selector'])
@@ -86,26 +98,14 @@ def obtener_titulares():
                     if len(texto_limpio) > 85: texto_limpio = texto_limpio[:82] + "..."
                     if texto_limpio and texto_limpio not in titulares_encontrados_set:
                         mensaje_noticias += f"- {texto_limpio}\n"
-                        titulares_encontrados_set.add(texto_limpio)
-                        count += 1
+                        titulares_encontrados_set.add(texto_limpio); count += 1
                 if count == 0: mensaje_noticias += "- No se encontraron titulares válidos.\n"
                 mensaje_noticias += "\n"
 
             except Exception as e:
-                # --- AQUÍ ESTÁ LA NUEVA MAGIA ---
-                print(f"  -> ERROR en {sitio['nombre']}: {type(e).__name__}. Guardando archivos de depuración...")
-                
-                # 1. Guardar la captura de pantalla
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
-                print(f"     -> Captura de pantalla guardada en '{screenshot_file}'")
-                
-                # 2. Guardar el código fuente HTML
-                html_file = f"{sitio['nombre'].replace(' ', '_')}-error.html"
-                with open(html_file, "w", encoding="utf-8") as f:
-                    f.write(driver.page_source)
-                print(f"     -> Código fuente guardado en '{html_file}'")
-                
+                print(f"  -> ERROR en {sitio['nombre']}: {type(e).__name__}. Captura guardada.")
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']}.\n\n"
     finally:
         if driver: driver.quit()
