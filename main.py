@@ -12,12 +12,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES FINALES Y ROBUSTOS) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (Volvemos a los más fiables para la depuración) ---
 SITIOS_WEB = [
-    # AS: Buscamos un h2 dentro de un enlace, en cualquier parte del <main>
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main a h2'},
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl > a'},
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'h2.ue-c-cover-content__headline'},
-    # El Diario Montañés: Volvemos al selector original, confiando en el scroll agresivo
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'h2.ue-c-cover-content__headline'}
 ]
@@ -28,6 +26,7 @@ LONGITUD = -3.81
 
 def handle_cookie_banner(driver):
     time.sleep(2)
+    # Buscamos textos genéricos para maximizar compatibilidad
     accept_button_xpaths = ["//button[contains(., 'I accept')]", "//button[contains(., 'Aceptar')]"]
     for xpath in accept_button_xpaths:
         try:
@@ -39,6 +38,7 @@ def handle_cookie_banner(driver):
     print("  -> No se encontró banner de cookies.")
 
 def obtener_prevision_tiempo():
+    # ... (Sin cambios) ...
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
@@ -69,15 +69,9 @@ def obtener_titulares():
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver)
 
-                # --- ESTRATEGIA DE SCROLL AGRESIVO ---
-                print("  -> Realizando scroll agresivo para cargar todo el contenido...")
-                last_height = driver.execute_script("return document.body.scrollHeight")
-                for _ in range(3): # Hacemos scroll 3 veces
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(2)
-                    new_height = driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height: break # Si la altura no cambia, dejamos de hacer scroll
-                    last_height = new_height
+                print("  -> Realizando un scroll suave...")
+                driver.execute_script("window.scrollTo(0, 800);")
+                time.sleep(2)
 
                 WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -98,15 +92,27 @@ def obtener_titulares():
                 mensaje_noticias += "\n"
 
             except Exception as e:
+                # --- AQUÍ ESTÁ LA NUEVA MAGIA ---
+                print(f"  -> ERROR en {sitio['nombre']}: {type(e).__name__}. Guardando archivos de depuración...")
+                
+                # 1. Guardar la captura de pantalla
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
-                print(f"  -> ERROR en {sitio['nombre']}: {type(e).__name__}. Captura guardada.")
+                print(f"     -> Captura de pantalla guardada en '{screenshot_file}'")
+                
+                # 2. Guardar el código fuente HTML
+                html_file = f"{sitio['nombre'].replace(' ', '_')}-error.html"
+                with open(html_file, "w", encoding="utf-8") as f:
+                    f.write(driver.page_source)
+                print(f"     -> Código fuente guardado en '{html_file}'")
+                
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']}.\n\n"
     finally:
         if driver: driver.quit()
     return mensaje_noticias
 
 def enviar_notificacion(topic_url, mensaje, titulo):
+    # ... (sin cambios) ...
     try:
         requests.post(
             topic_url, data=mensaje.encode('utf-8'),
