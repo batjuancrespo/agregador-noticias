@@ -1,42 +1,51 @@
-# Nombre del flujo de trabajo
+# Nombre del flujo de trabajo que aparecerá en la pestaña "Actions" de GitHub
 name: Raspador de Noticias Diario
 
-# Define cuándo se ejecutará
+# Define cuándo se ejecutará este flujo de trabajo
 on:
-  # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub para probar
+  # Permite ejecutarlo manualmente desde la pestaña Actions de GitHub (muy útil para probar)
   workflow_dispatch:
   
-  # Ejecución programada (cron job)
-  # Este ejemplo se ejecuta todos los días a las 08:00 UTC (10:00 en España en verano)
-  # Puedes personalizar la hora en https://crontab.guru/
+  # Ejecución programada usando la sintaxis cron
+  # '45 4 * * *' significa:
+  #   - 45: en el minuto 45
+  #   - 4:  en la hora 4 (UTC)
+  #   - *:  todos los días del mes
+  #   - *:  todos los meses
+  #   - *:  todos los días de la semana
+  # Esto corresponde a las 6:45 AM en España (horario de verano, UTC+2)
+  # y a las 5:45 AM en España (horario de invierno, UTC+1).
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '45 4 * * *'
 
+# Define los trabajos (jobs) que se van a ejecutar
 jobs:
   scrape-and-notify:
-    # Se ejecutará en una máquina virtual con Ubuntu
+    # El tipo de máquina virtual donde se ejecutará el código
     runs-on: ubuntu-latest
 
+    # Los pasos que componen el trabajo
     steps:
-      # 1. Descarga el código de tu repositorio
+      # 1. Clona tu repositorio para que el runner tenga acceso a tu código
       - name: Checkout del código
         uses: actions/checkout@v4
 
-      # 2. Configura el entorno de Python 3.10
+      # 2. Configura el entorno de Python
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.10' # Puedes usar una versión más reciente si quieres
 
-      # 3. Instala las librerías del archivo requirements.txt
+      # 3. Instala las dependencias de Python del archivo requirements.txt
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. Ejecuta el script principal
-      - name: Ejecutar el script de scraping
+      # 4. Ejecuta el script de Python
+      - name: Ejecutar el script de scraping y notificación
+        # Aquí pasamos la URL de ntfy como una variable de entorno segura
+        # El valor de ${{ secrets.NTFY_TOPIC }} se configura en los secretos del repositorio
         env:
-          # Aquí se inyecta el "secret" que configurarás en GitHub
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py
