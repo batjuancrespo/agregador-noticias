@@ -11,30 +11,14 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 
 # --- CONFIGURACIÓN DE SITIOS WEB ---
-# Usamos los selectores que sabemos que son correctos una vez que la página carga
 SITIOS_WEB = [
-    {
-        'nombre': 'AS',
-        'url': 'https://as.com/',
-        'selector': 'h2.s__tl'
-    },
-    {
-        'nombre': 'Marca',
-        'url': 'https://www.marca.com/',
-        'selector': 'h2.ue-c-main-headline'
-    },
-    {
-        'nombre': 'El Diario Montañés',
-        'url': 'https://www.eldiariomontanes.es/santander/',
-        'selector': 'h2.voc-title a'
-    },
-    {
-        'nombre': 'El Mundo',
-        'url': 'https://www.elmundo.es/',
-        'selector': 'h2.ue-c-main-headline'
-    }
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl'},
+    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'h2.ue-c-main-headline'},
+    {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
+    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'h2.ue-c-main-headline'}
 ]
 
 # --- CONFIGURACIÓN DEL TIEMPO ---
@@ -42,8 +26,34 @@ CIUDAD = "Santander"
 LATITUD = 43.46
 LONGITUD = -3.81
 
+def handle_cookie_banner(driver):
+    """
+    Intenta encontrar y hacer clic en el botón de aceptar cookies.
+    Es robusto y prueba varios selectores comunes.
+    """
+    # Lista de posibles selectores para el botón de "Aceptar"
+    cookie_selectors = [
+        "#didomi-notice-agree-button",          # ID común (usado por Marca/Mundo)
+        "//button[contains(text(), 'Aceptar')]", # XPath para botones con texto "Aceptar"
+        ".voc-button-container .voc-button--primary" # Selector para El Diario Montañés (Vocento)
+    ]
+    
+    for selector in cookie_selectors:
+        try:
+            # Espera un máximo de 5 segundos a que el botón aparezca
+            cookie_button = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR if '#' in selector or '.' in selector else By.XPATH, selector))
+            )
+            print("  -> Banner de cookies encontrado. Haciendo clic en aceptar...")
+            cookie_button.click()
+            time.sleep(2) # Espera un poco a que el banner desaparezca
+            return # Si lo encuentra y hace clic, salimos de la función
+        except TimeoutException:
+            # Si no encuentra el botón con este selector, simplemente continúa al siguiente
+            pass
+    print("  -> No se encontró un banner de cookies o ya fue aceptado.")
+
 def obtener_prevision_tiempo():
-    # Esta función no cambia, sigue usando requests
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m&timezone=Europe/Madrid"
@@ -51,30 +61,21 @@ def obtener_prevision_tiempo():
         response.raise_for_status()
         data = response.json()
         temperatura_15h = data['hourly']['temperature_2m'][15]
-        mensaje_tiempo = f"☀️ Previsión para {CIUDAD} a las 15:00\n"
-        mensaje_tiempo += f"- Temperatura: {temperatura_15h}°C\n\n"
-        return mensaje_tiempo
+        return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temperatura_15h}°C\n\n"
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}")
         return f"🔴 No se pudo obtener la previsión del tiempo para {CIUDAD}.\n\n"
 
 def obtener_titulares():
-    """
-    Función REESCRITA para usar Selenium y simular un navegador real.
-    """
     mensaje_noticias = "📰 Titulares del día\n\n"
-    
-    # --- Configuración de Opciones de Chrome para Selenium ---
     chrome_options = Options()
-    chrome_options.add_argument("--headless")  # Ejecutar sin abrir una ventana de navegador visible
-    chrome_options.add_argument("--no-sandbox") # Requerido para ejecutar como root (común en CI/CD)
-    chrome_options.add_argument("--disable-dev-shm-usage") # Evita problemas en entornos con memoria limitada
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-
-    # Inicializamos el driver de Chrome
+    
     driver = None
     try:
-        # Usamos Service() para una mejor gestión del driver
         service = Service()
         driver = webdriver.Chrome(service=service, options=chrome_options)
 
@@ -83,31 +84,26 @@ def obtener_titulares():
                 print(f"Obteniendo titulares de: {sitio['nombre']} con Selenium...")
                 driver.get(sitio['url'])
 
-                # Esperamos un máximo de 10 segundos a que el contenido principal aparezca
-                # Usamos el selector CSS para la espera, es una buena señal de que la página cargó
+                # --- PASO CLAVE: MANEJAR COOKIES ANTES DE NADA ---
+                handle_cookie_banner(driver)
+
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, sitio['selector']))
                 )
-                
-                # Pequeña pausa adicional por si acaso
-                time.sleep(2) 
-
-                # Una vez cargada la página, obtenemos el HTML y lo pasamos a BeautifulSoup
+                time.sleep(2)
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
-                
                 titulares_html = soup.select(sitio['selector'])
                 print(f"  -> Encontrados {len(titulares_html)} elementos con el selector '{sitio['selector']}'.")
 
                 if not titulares_html:
                     mensaje_noticias += f"⚪️ -- {sitio['nombre']}: No se encontraron titulares hoy --\n\n"
                     continue
-
+                
                 mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
                 count = 0
                 titulares_encontrados = set()
                 for titular in titulares_html:
-                    if count >= 5:
-                        break
+                    if count >= 5: break
                     texto_limpio = titular.get_text(strip=True)
                     if texto_limpio and texto_limpio not in titulares_encontrados:
                         mensaje_noticias += f"- {texto_limpio}\n"
@@ -119,14 +115,11 @@ def obtener_titulares():
                 print(f"Error durante el scraping de {sitio['nombre']}: {e}")
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']}.\n\n"
     finally:
-        # Es MUY importante cerrar el navegador al final para liberar recursos
         if driver:
             driver.quit()
-    
     return mensaje_noticias
 
 def enviar_notificacion(topic_url, mensaje, titulo):
-    # Esta función no cambia
     try:
         requests.post(
             topic_url,
