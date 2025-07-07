@@ -10,29 +10,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Clona el repositorio
       - name: Checkout del código
         uses: actions/checkout@v4
 
-      # 2. Configura Python
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 3. (NUEVO) Instalar Google Chrome para Selenium
-      # Este paso descarga e instala una versión de Chrome compatible en el runner
       - name: Instalar Google Chrome
         uses: browser-actions/setup-chrome@latest
 
-      # 4. Instala las dependencias de Python (incluyendo selenium)
       - name: Instalar dependencias
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 5. Ejecuta el script con Selenium
       - name: Ejecutar el script de scraping y notificación
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py
+
+      # --- NUEVO PASO PARA SUBIR LAS CAPTURAS DE PANTALLA ---
+      - name: Subir capturas de pantalla de errores
+        # 'if: failure()' significa que este paso SOLO se ejecutará si algún paso anterior ha fallado
+        # Sin embargo, lo dejaremos para que se ejecute siempre y así subir las capturas si se generan
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-de-error
+          path: ./*.png  # Sube todos los archivos que terminen en .png
+          if-no-files-found: ignore # No da error si no se encuentra ningún .png
