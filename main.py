@@ -13,12 +13,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB ---
+# --- CONFIGURACIÓN DE SITIOS WEB (CON SELECTORES FINALES Y VERIFICADOS) ---
 SITIOS_WEB = [
     {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl'},
-    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'h2.ue-c-main-headline'},
+    {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link'},
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/santander/', 'selector': 'h2.voc-title a'},
-    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'h2.ue-c-main-headline'}
+    {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link'}
 ]
 
 # --- CONFIGURACIÓN DEL TIEMPO ---
@@ -27,37 +27,23 @@ LATITUD = 43.46
 LONGITUD = -3.81
 
 def handle_cookie_banner(driver):
-    """
-    Función súper robusta que busca y pulsa el botón de aceptar cookies
-    usando el texto exacto de los botones de las capturas de pantalla.
-    """
-    time.sleep(2) # Pausa inicial
-    
-    # Lista de XPaths para los diferentes botones de "Aceptar"
-    # El orden es de más específico a más general
+    time.sleep(2)
     accept_button_xpaths = [
-        "//button[contains(., 'I accept and continue for free')]", # Para MARCA
-        "//button[contains(., 'Accept and continue')]",            # Para El Mundo
-        "//button[contains(., 'Aceptar y continuar')]",           # Para El Diario Montañés
-        "//button[contains(., 'Aceptar')]"                        # Un genérico de respaldo
+        "//button[contains(., 'I accept and continue for free')]",
+        "//button[contains(., 'Accept and continue')]",
+        "//button[contains(., 'Aceptar y continuar')]",
+        "//button[contains(., 'Aceptar')]"
     ]
-    
     for xpath in accept_button_xpaths:
         try:
-            # Esperamos un máximo de 3 segundos por cada tipo de botón
-            button = WebDriverWait(driver, 3).until(
-                EC.element_to_be_clickable((By.XPATH, xpath))
-            )
+            button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
             print(f"  -> Botón de cookies encontrado con el texto: '{button.text}'. Pulsando...")
             button.click()
-            time.sleep(2) # Damos tiempo a que la página reaccione y desaparezca el banner
-            return # Si lo encontramos y pulsamos, salimos de la función
+            time.sleep(2)
+            return
         except TimeoutException:
-            # Si no se encuentra este botón, no hacemos nada y probamos el siguiente
             continue
-            
     print("  -> No se encontró ningún banner de cookies conocido o ya estaba aceptado.")
-
 
 def obtener_prevision_tiempo():
     try:
@@ -90,12 +76,11 @@ def obtener_titulares():
             try:
                 print(f"Obteniendo titulares de: {sitio['nombre']} con Selenium...")
                 driver.get(sitio['url'])
-
                 handle_cookie_banner(driver)
 
-                # Aumentamos la espera principal por si la página tarda en refrescar tras aceptar cookies
+                # --- CAMBIO CLAVE: ESPERAR A QUE EL ELEMENTO SEA VISIBLE ---
                 WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, sitio['selector']))
+                    EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector']))
                 )
                 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -117,7 +102,7 @@ def obtener_titulares():
             except TimeoutException:
                 screenshot_file = f"{sitio['nombre'].replace(' ', '_')}-error.png"
                 driver.save_screenshot(screenshot_file)
-                print(f"  -> ERROR: Timeout esperando el selector '{sitio['selector']}'.")
+                print(f"  -> ERROR: Timeout esperando la visibilidad del selector '{sitio['selector']}'.")
                 print(f"  -> Se ha guardado una captura de pantalla en '{screenshot_file}'.")
                 mensaje_noticias += f"🔴 Error al obtener titulares de {sitio['nombre']} (Timeout).\n\n"
             except Exception as e:
