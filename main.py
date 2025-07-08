@@ -13,11 +13,9 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (SELECTORES FINALES Y VERIFICADOS) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (AJUSTES FINALES) ---
 SITIOS_WEB = [
-    # Selector de precisión final para AS
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main h2.s__tl'},
-    # NO SE TOCAN: Lógica y selectores que ya funcionan
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main h2.s__tl a'},
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'},
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/', 'selector': 'h2.v-a-t'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'}
@@ -36,7 +34,7 @@ def handle_cookie_banner(driver, sitio_nombre):
             agree_button = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Agree & continue')]")))
             agree_button.click()
             driver.switch_to.default_content()
-            print("  -> Banner de AS.com gestionado.")
+            print("  -> Banner de AS.com gestionado con éxito.")
             time.sleep(2)
             return
         except TimeoutException:
@@ -48,19 +46,21 @@ def handle_cookie_banner(driver, sitio_nombre):
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
             button.click(); time.sleep(3)
-            print("  -> Banner de cookies genérico gestionado.")
+            print("  -> Banner de cookies genérico gestionado con éxito.")
             return
         except TimeoutException: continue
     print("  -> No se encontró ningún banner conocido.")
 
 def obtener_prevision_tiempo():
-    # ... (Sin cambios, ya funciona correctamente) ...
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
         response = requests.get(url_api, timeout=10)
-        response.raise_for_status(); data = response.json()
-        temp, prob_lluvia, precip = data['hourly']['temperature_2m'][15], data['hourly']['precipitation_probability'][15], data['hourly']['precipitation'][15]
+        response.raise_for_status()
+        data = response.json()
+        temp = data['hourly']['temperature_2m'][15]
+        prob_lluvia = data['hourly']['precipitation_probability'][15]
+        precip = data['hourly']['precipitation'][15]
         return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temp}°C\n- Prob. de lluvia: {prob_lluvia}%\n- Precipitación: {precip} mm\n\n"
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}")
@@ -71,6 +71,12 @@ def obtener_titulares():
     chrome_options = Options()
     chrome_options.add_argument("--headless"); chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage"); chrome_options.add_argument("--window-size=1920,1200")
+    
+    # --- AJUSTE CLAVE PARA GEOLOCALIZACIÓN ---
+    # Le decimos al navegador que nuestro idioma preferido es Español de España.
+    chrome_options.add_argument("--lang=es-ES")
+    chrome_options.add_argument("accept-language=es-ES,es;q=0.9")
+
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
     
     driver = None
@@ -84,45 +90,38 @@ def obtener_titulares():
                 driver.get(sitio['url'])
                 handle_cookie_banner(driver, sitio['nombre'])
                 titulares_obtenidos = []
-
+                
                 if sitio['nombre'] == 'El Diario Montañés':
-                    # ... (Lógica JSON-LD - NO SE TOCA) ...
                     print("  -> Usando estrategia JSON-LD...")
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
                     json_scripts = soup.find_all('script', type='application/ld+json')
                     for script in json_scripts:
                         try:
-                            data = json.loads(script.string)
-                            data_list = data if isinstance(data, list) else [data]
+                            data = json.loads(script.string); data_list = data if isinstance(data, list) else [data]
                             for item_data in data_list:
-                                if item_data.get('@type') == 'ItemList' and 'itemListElement' in item_data:
+                                if item_data.get('@type') == 'ItemList':
+                                    print("  -> ¡ÉXITO! Encontrado ItemList en JSON-LD.")
                                     for item in item_data.get('itemListElement', []): titulares_obtenidos.append(item['name'])
                                     if titulares_obtenidos: break
                             if titulares_obtenidos: break
                         except: continue
-
-                else: # --- Lógica para AS, Marca y El Mundo ---
+                
+                if not titulares_obtenidos:
                     print("  -> Usando estrategia de selector estándar...")
-                    # Espera a que el contenedor principal esté listo
-                    WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "main")))
-                    print("  -> Contenedor <main> encontrado.")
                     driver.execute_script("window.scrollTo(0, 1000);")
                     time.sleep(2)
-                    
-                    # Ahora espera por los titulares dentro de ese contenedor
-                    WebDriverWait(driver, 15).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
+                    WebDriverWait(driver, 25).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
                     titulares_html = soup.select(sitio['selector'])
+                    print(f"  -> Encontrados {len(titulares_html)} elementos con el selector.")
                     for element in titulares_html: titulares_obtenidos.append(element.get_text(strip=True))
 
-                # --- Construcción del mensaje (común para todos) ---
                 if titulares_obtenidos:
-                    print(f"  -> ¡ÉXITO! Encontrados {len(titulares_obtenidos)} titulares para {sitio['nombre']}.")
                     mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
                     count = 0; titulares_set = set()
                     for titular in titulares_obtenidos:
-                        if count >= 7: break
-                        if len(titular) > 90: titular = titular[:87] + "..."
+                        # --- CAMBIO: AUMENTAMOS A 10 Y ELIMINAMOS EL TRUNCAMIENTO ---
+                        if count >= 10: break
                         if titular and titular not in titulares_set:
                             mensaje_noticias += f"- {titular}\n"; titulares_set.add(titular); count += 1
                     if count == 0: mensaje_noticias += "- No se encontraron titulares válidos.\n"
@@ -138,7 +137,6 @@ def obtener_titulares():
     return mensaje_noticias
 
 def enviar_notificacion(topic_url, mensaje, titulo):
-    # ... (Lógica de notificación con botón - NO SE TOCA) ...
     try:
         requests.post(topic_url, data=mensaje.encode('utf-8'),
             headers={
@@ -149,9 +147,10 @@ def enviar_notificacion(topic_url, mensaje, titulo):
     except Exception as e: print(f"Error al enviar la notificación a ntfy: {e}")
 
 if __name__ == "__main__":
-    # ... (Sin cambios) ...
     NTFY_TOPIC_URL = os.getenv('NTFY_TOPIC')
-    if not NTFY_TOPIC_URL: print("Error: La variable de entorno 'NTFY_TOPIC' no está configurada."); exit(1)
+    if not NTFY_TOPIC_URL:
+        print("Error: La variable de entorno 'NTFY_TOPIC' no está configurada."); exit(1)
+    
     prevision_tiempo = obtener_prevision_tiempo()
     titulares = obtener_titulares()
     mensaje_completo = prevision_tiempo + titulares
