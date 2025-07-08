@@ -31,12 +31,12 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py
 
-      # --- PASO ACTUALIZADO PARA SUBIR TODOS LOS ARCHIVOS DE DEPURACIÓN ---
+      # Actualizado para subir archivos .png Y .html
       - name: Subir artefactos de depuración
         uses: actions/upload-artifact@v4
         with:
-          name: debug-files
-          # Subimos tanto los .png como los .html
+          name: debug-artifacts
+          # Usamos un patrón que captura ambos tipos de archivo
           path: |
             *.png
             *.html
