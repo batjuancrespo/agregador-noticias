@@ -13,10 +13,13 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (URL Corregida para El Diario Montañés) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (URL Corregida y Selectores Refinados) ---
 SITIOS_WEB = [
+    # AS: Selector específico para los artículos del contenido principal.
     {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main article.s-art h2 > a'},
+    # Marca y El Mundo: Selectores que ya funcionan, NO SE TOCAN.
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'},
+    # El Diario Montañes: URL principal. Usaremos la estrategia JSON-LD.
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/', 'selector': 'h2.v-a-t'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'}
 ]
@@ -26,27 +29,34 @@ LATITUD = 43.46
 LONGITUD = -3.81
 
 def handle_cookie_banner(driver, sitio_nombre):
-    time.sleep(3)
+    time.sleep(3) # Pausa para que carguen los banners
 
-    # --- Estrategia específica y nueva para AS.COM ---
+    # --- Estrategia específica para el iFrame de AS.COM ---
     if sitio_nombre == 'AS':
         try:
-            # Buscamos el botón por el texto "Agree & continue"
+            print("  -> Buscando iframe de Contentpass en AS.com...")
+            iframe = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//iframe[contains(@title, 'Contentpass')]"))
+            )
+            driver.switch_to.frame(iframe)
+            print("  -> iFrame encontrado. Entrando para hacer clic...")
             agree_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Agree & continue')]"))
             )
-            print("  -> Banner de AS.com encontrado. Pulsando 'Agree & continue'...")
             agree_button.click()
+            print("  -> Botón 'Agree & continue' pulsado.")
+            driver.switch_to.default_content() # Volvemos al documento principal
             time.sleep(3)
             return
         except TimeoutException:
-            print("  -> No se encontró el banner de 'Agree & continue' de AS.com.")
+            print("  -> No se encontró el banner de Contentpass de AS.com, continuando...")
+            driver.switch_to.default_content()
 
-    # --- Estrategia general para los demás periódicos ---
+    # --- Estrategia general para los demás ---
     other_buttons_xpaths = [
-        "//button[contains(., 'I accept and continue for free')]",
-        "//button[contains(., 'Accept and continue')]",
-        "//button[contains(., 'Aceptar y continuar')]"
+        "//button[contains(., 'I accept and continue for free')]", # Marca
+        "//button[contains(., 'Accept and continue')]",            # El Mundo
+        "//button[contains(., 'Aceptar y continuar')]"           # El Diario Montañés
     ]
     for xpath in other_buttons_xpaths:
         try:
@@ -69,7 +79,6 @@ def obtener_prevision_tiempo():
         response.raise_for_status()
         data = response.json()
         
-        # Extraemos el valor del índice 15 (las 3 PM) de cada lista
         temp = data['hourly']['temperature_2m'][15]
         prob_lluvia = data['hourly']['precipitation_probability'][15]
         precip = data['hourly']['precipitation'][15]
@@ -98,8 +107,7 @@ def obtener_titulares():
                 handle_cookie_banner(driver, sitio['nombre'])
 
                 titulares_obtenidos = []
-
-                # --- Estrategia 1: Leer el JSON-LD (ideal para El Diario Montañés) ---
+                
                 if sitio['nombre'] == 'El Diario Montañés':
                     print("  -> Usando estrategia JSON-LD...")
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -107,29 +115,27 @@ def obtener_titulares():
                     for script in json_scripts:
                         try:
                             data = json.loads(script.string)
-                            if isinstance(data, list): data = data[0]
-                            if data.get('@type') == 'ItemList' and 'itemListElement' in data:
-                                print("  -> ¡ÉXITO! Encontrado ItemList en JSON-LD.")
-                                for item in data['itemListElement']:
-                                    titulares_obtenidos.append(item['name'])
-                                break
+                            data_list = data if isinstance(data, list) else [data]
+                            for item_data in data_list:
+                                if item_data.get('@type') == 'ItemList':
+                                    print("  -> ¡ÉXITO! Encontrado ItemList en JSON-LD.")
+                                    for item in item_data.get('itemListElement', []):
+                                        titulares_obtenidos.append(item['name'])
+                                    if titulares_obtenidos: break
+                            if titulares_obtenidos: break
                         except (json.JSONDecodeError, AttributeError): continue
                 
-                # --- Estrategia 2: Selectores estándar (para AS, Marca, Mundo) ---
-                if not titulares_obtenidos: # Si la estrategia 1 no funcionó o no se aplicó
+                if not titulares_obtenidos:
                     print("  -> Usando estrategia de selector estándar...")
-                    print("  -> Haciendo scroll para activar contenido...")
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                     time.sleep(2)
                     WebDriverWait(driver, 25).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
-                    
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
                     titulares_html = soup.select(sitio['selector'])
                     print(f"  -> Encontrados {len(titulares_html)} elementos con el selector.")
                     for titular_element in titulares_html:
                         titulares_obtenidos.append(titular_element.get_text(strip=True))
 
-                # --- Construcción del mensaje (común para todos) ---
                 if titulares_obtenidos:
                     mensaje_noticias += f"🔵 == {sitio['nombre']} ==\n"
                     count = 0; titulares_set = set()
@@ -162,6 +168,7 @@ if __name__ == "__main__":
     NTFY_TOPIC_URL = os.getenv('NTFY_TOPIC')
     if not NTFY_TOPIC_URL:
         print("Error: La variable de entorno 'NTFY_TOPIC' no está configurada."); exit(1)
+    
     prevision_tiempo = obtener_prevision_tiempo()
     titulares = obtener_titulares()
     mensaje_completo = prevision_tiempo + titulares
