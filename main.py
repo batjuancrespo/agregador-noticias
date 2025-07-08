@@ -13,13 +13,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 
-# --- CONFIGURACIÓN DE SITIOS WEB (URL Corregida y Selectores Refinados) ---
+# --- CONFIGURACIÓN DE SITIOS WEB (CON SELECTOR FINAL PARA AS.COM) ---
 SITIOS_WEB = [
-    # AS: Selector específico para los artículos del contenido principal.
-    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'main article.s-art h2 > a'},
-    # Marca y El Mundo: Selectores que ya funcionan, NO SE TOCAN.
+    # Selector de precisión para AS, basado en el análisis final.
+    {'nombre': 'AS', 'url': 'https://as.com/', 'selector': 'h2.s__tl a'},
+    # NO SE TOCAN: Selectores que ya funcionan para Marca, El Mundo y El Diario Montañés.
     {'nombre': 'Marca', 'url': 'https://www.marca.com/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'},
-    # El Diario Montañes: URL principal. Usaremos la estrategia JSON-LD.
     {'nombre': 'El Diario Montañés', 'url': 'https://www.eldiariomontanes.es/', 'selector': 'h2.v-a-t'},
     {'nombre': 'El Mundo', 'url': 'https://www.elmundo.es/', 'selector': 'a.ue-c-cover-content__link h2.ue-c-cover-content__headline'}
 ]
@@ -29,60 +28,50 @@ LATITUD = 43.46
 LONGITUD = -3.81
 
 def handle_cookie_banner(driver, sitio_nombre):
-    time.sleep(3) # Pausa para que carguen los banners
+    time.sleep(3)
 
-    # --- Estrategia específica para el iFrame de AS.COM ---
+    # Estrategia para el iFrame de Contentpass en AS.COM
     if sitio_nombre == 'AS':
         try:
-            print("  -> Buscando iframe de Contentpass en AS.com...")
             iframe = WebDriverWait(driver, 5).until(
                 EC.presence_of_element_located((By.XPATH, "//iframe[contains(@title, 'Contentpass')]"))
             )
             driver.switch_to.frame(iframe)
-            print("  -> iFrame encontrado. Entrando para hacer clic...")
             agree_button = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Agree & continue')]"))
             )
             agree_button.click()
-            print("  -> Botón 'Agree & continue' pulsado.")
-            driver.switch_to.default_content() # Volvemos al documento principal
+            driver.switch_to.default_content()
             time.sleep(3)
+            print("  -> Banner de AS.com gestionado con éxito.")
             return
         except TimeoutException:
-            print("  -> No se encontró el banner de Contentpass de AS.com, continuando...")
             driver.switch_to.default_content()
+            print("  -> No se encontró el banner de Contentpass de AS.com, continuando...")
 
-    # --- Estrategia general para los demás ---
-    other_buttons_xpaths = [
-        "//button[contains(., 'I accept and continue for free')]", # Marca
-        "//button[contains(., 'Accept and continue')]",            # El Mundo
-        "//button[contains(., 'Aceptar y continuar')]"           # El Diario Montañés
-    ]
+    # Estrategia general para los demás
+    other_buttons_xpaths = ["//button[contains(., 'I accept and continue for free')]", "//button[contains(., 'Accept and continue')]", "//button[contains(., 'Aceptar y continuar')]"]
     for xpath in other_buttons_xpaths:
         try:
             button = WebDriverWait(driver, 3).until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            print(f"  -> Botón de cookies genérico encontrado. Pulsando...")
             button.click()
             time.sleep(3)
+            print("  -> Banner de cookies genérico gestionado con éxito.")
             return
         except TimeoutException:
             continue
-            
     print("  -> No se encontró ningún banner de cookies conocido o ya estaba aceptado.")
 
 def obtener_prevision_tiempo():
-    # --- VERSIÓN CORREGIDA PARA MOSTRAR LOS DATOS DEL TIEMPO ---
     try:
         print(f"Obteniendo previsión del tiempo para {CIUDAD}...")
         url_api = f"https://api.open-meteo.com/v1/forecast?latitude={LATITUD}&longitude={LONGITUD}&hourly=temperature_2m,precipitation_probability,precipitation&timezone=Europe/Madrid"
         response = requests.get(url_api, timeout=10)
         response.raise_for_status()
         data = response.json()
-        
         temp = data['hourly']['temperature_2m'][15]
         prob_lluvia = data['hourly']['precipitation_probability'][15]
         precip = data['hourly']['precipitation'][15]
-        
         return f"☀️ Previsión para {CIUDAD} a las 15:00\n- Temperatura: {temp}°C\n- Prob. de lluvia: {prob_lluvia}%\n- Precipitación: {precip} mm\n\n"
     except Exception as e:
         print(f"Error obteniendo el tiempo: {e}")
@@ -107,7 +96,7 @@ def obtener_titulares():
                 handle_cookie_banner(driver, sitio['nombre'])
 
                 titulares_obtenidos = []
-                
+
                 if sitio['nombre'] == 'El Diario Montañés':
                     print("  -> Usando estrategia JSON-LD...")
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -130,6 +119,7 @@ def obtener_titulares():
                     driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 3);")
                     time.sleep(2)
                     WebDriverWait(driver, 25).until(EC.visibility_of_element_located((By.CSS_SELECTOR, sitio['selector'])))
+                    
                     soup = BeautifulSoup(driver.page_source, 'html.parser')
                     titulares_html = soup.select(sitio['selector'])
                     print(f"  -> Encontrados {len(titulares_html)} elementos con el selector.")
