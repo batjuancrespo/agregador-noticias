@@ -36,7 +36,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-artifacts
-          # Usamos un patrón que captura ambos tipos de archivo
           path: |
             *.png
             *.html
